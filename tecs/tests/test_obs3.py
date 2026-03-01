@@ -12,7 +12,7 @@ from builtins import object
 
 import datetime
 
-import nose
+import pytest
 
 from io import StringIO
 import tecs.rinex.v3.o as obs_v3
@@ -235,9 +235,8 @@ class TestObs3(object):
 
     # def _det_filename_date(self):
     #     assert False
-
     def test__handle_power_failure(self):
-        raise nose.SkipTest
+        pytest.skip("Not implemented")
 
     def test__det_data_chunks(self):
-        raise nose.SkipTest
+        pytest.skip("Not implemented")

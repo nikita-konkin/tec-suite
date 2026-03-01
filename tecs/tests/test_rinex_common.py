@@ -10,8 +10,7 @@ from __future__ import unicode_literals
 
 import datetime
 
-from nose.plugins.attrib import attr
-from nose.tools import assert_raises
+import pytest
 
 from tecs.rinex.common import validate_epoch
 
@@ -19,7 +18,7 @@ NAME = 'test_rinex_common'
 VERSION = 0.1
 
 
-@attr('rinex.common')
+@pytest.mark.rinex_common
 def test_validate_epoch():
     """validate_epoch
     """
@@ -46,5 +45,5 @@ def test_validate_epoch():
 
     epoch = [1999, 6, 8, 21, 0, 121, 0]
 
-    with assert_raises(ValueError):
+    with pytest.raises(ValueError):
         validate_epoch(epoch)

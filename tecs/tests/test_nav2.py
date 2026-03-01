@@ -19,7 +19,7 @@ try:
 except ImportError:
     from io import StringIO
 
-from nose.tools import raises
+import pytest
 
 from tecs.rinex.v2.n import Nav2
 
@@ -130,10 +130,11 @@ def test__parse_epoch_record():
 
 def test_gps_error_nav():
     fobj = io.StringIO(GPS_MSG_ERR)
+    
     Nav2(fobj, 'brdc2880.11n')
 
-
-@raises(RinexError)
 def test_glo_err_nav():
     fobj = io.StringIO(GLO_MSG_ERR)
-    Nav2(fobj, 'zimj1000.16g')
+    with pytest.raises(RinexError):
+        Nav2(fobj, 'zimj1000.16g')
+
