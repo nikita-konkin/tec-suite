@@ -37,8 +37,9 @@ if os.name == 'nt':
     except Exception as err:
         print(str(err))
     finally:
-        msg = '\nPress Enter key to close the window.'
+        # msg = '\nPress Enter key to close the window.'
+        msg = '\nTecSuite is finished.'
         print(msg)
-        sys.stdin.readline()
+        # sys.stdin.readline()
 else:
     run()

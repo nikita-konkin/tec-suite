@@ -69,7 +69,9 @@ def obs_file(filename):
         3.00: Obs3,
         3.01: Obs301,
         3.02: Obs302,
-        3.03: Obs303
+        3.03: Obs303,
+        # RINEX 3.04 is a minor revision; use same parser as 3.03
+        3.04: Obs303
     }
 
     if rinex_version in rnx_cls:

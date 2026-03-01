@@ -23,3 +23,5 @@ build
 
 tec-suite-v*/
 tec-suite-v*.*
+
+out/
