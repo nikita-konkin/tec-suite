@@ -223,7 +223,7 @@ def main() -> int:
         print(f"Using up to {args.jobs} parallel jobs")
 
     # gather all archive paths first
-    work_items = []  # tuples (archive,)
+    work_items: list[tuple[int,Path]] = []  # (index, archive)
     for entry in sorted(root.iterdir()):
         if not entry.is_dir():
             if args.verbose:
@@ -244,16 +244,20 @@ def main() -> int:
             continue
 
         for archive in archives:
-            work_items.append(archive)
+            work_items.append((0, archive))
 
     if not work_items:
         print("No archives to process.")
         return 0
 
+    total = len(work_items)
+    # assign indices
+    work_items = [(i+1, archive) for i, (_, archive) in enumerate(work_items)]
+
     # process archives either sequentially or in parallel
     if args.jobs <= 1:
-        for archive in work_items:
-            print(f"--- archive: {archive.name} ---")
+        for idx, archive in work_items:
+            print(f"Processing file {idx}/{total}: {archive.name}")
             try:
                 process_archive(
                     archive,
@@ -270,19 +274,23 @@ def main() -> int:
     else:
         # run up to args.jobs workers
         with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-            futures = {
-                pool.submit(
+            futures = {}
+            for idx, archive in work_items:
+                print(f"Submitting job {idx}/{total}: {archive.name}")
+                fut = pool.submit(
                     process_archive,
                     archive,
                     args.cfg,
                     args.tecs,
                     args.verbose,
                     args.cleanup,
-                    args.out
-                ): archive for archive in work_items
-            }
+                    args.out,
+                )
+                futures[fut] = (idx, archive)
+
             for fut in as_completed(futures):
-                archive = futures[fut]
+                idx, archive = futures[fut]
+                print(f"Completed {idx}/{total}: {archive.name}")
                 try:
                     fut.result()
                 except subprocess.CalledProcessError as e:
