@@ -75,7 +75,8 @@ def process_archive(
     cfg_template: Path,
     tecs_script: Path,
     verbose: bool = False,
-    cleanup: bool = False
+    cleanup: bool = False,
+    out_dir_override: Path | None = None
 ) -> None:
     """Unzip *zip_path*, update config, and run tecs.
 
@@ -100,20 +101,25 @@ def process_archive(
         # temporary config writes outputs to the project's out folder
         orig_cfg_text = cfg_template.read_text().splitlines()
         out_dir_path: Path | None = None
-        for l in orig_cfg_text:
-            s = l.strip()
-            if s.startswith("outDir"):
-                parts = s.split("=", 1)
-                if len(parts) > 1:
-                    val = parts[1].strip().strip("'\"")
-                    if val:
-                        cand = Path(val)
-                        if not cand.is_absolute():
-                            cand = (cfg_template.parent / cand).resolve()
-                        out_dir_path = cand
-                break
-        if out_dir_path is None:
-            out_dir_path = (cfg_template.parent / "out").resolve()
+        if out_dir_override:
+            out_dir_path = out_dir_override
+            if not out_dir_path.is_absolute():
+                out_dir_path = (Path.cwd() / out_dir_path).resolve()
+        else:
+            for l in orig_cfg_text:
+                s = l.strip()
+                if s.startswith("outDir"):
+                    parts = s.split("=", 1)
+                    if len(parts) > 1:
+                        val = parts[1].strip().strip("'\"")
+                        if val:
+                            cand = Path(val)
+                            if not cand.is_absolute():
+                                cand = (cfg_template.parent / cand).resolve()
+                            out_dir_path = cand
+                    break
+            if out_dir_path is None:
+                out_dir_path = (cfg_template.parent / "out").resolve()
 
         dest_dir = zip_path.with_suffix("")
         if not dest_dir.exists():
@@ -145,6 +151,7 @@ def process_archive(
             # append summary to our own log file in out_dir
             if out_dir_path is not None:
                 log_file = out_dir_path / 'process_rinex.log'
+                os.makedirs(out_dir_path, exist_ok=True)
                 with open(log_file, 'a') as lf:
                     lf.write(f"{start_ts.isoformat()} - {status} {dest_dir.name} "
                              f"({dest_dir}) in {end_ts - start_ts}\n")
@@ -197,6 +204,10 @@ def main() -> int:
         help="Delete extracted folders after tecs has run."
     )
     parser.add_argument(
+        "--out", "-o", type=Path,
+        help="Optional output directory override (absolute or relative to container)."
+    )
+    parser.add_argument(
         "--jobs", "-j", type=int, default=1,
         help="Number of archives to process in parallel (default 1)."
     )
@@ -245,8 +256,12 @@ def main() -> int:
             print(f"--- archive: {archive.name} ---")
             try:
                 process_archive(
-                    archive, args.cfg, args.tecs,
-                    verbose=args.verbose, cleanup=args.cleanup
+                    archive,
+                    args.cfg,
+                    args.tecs,
+                    verbose=args.verbose,
+                    cleanup=args.cleanup,
+                    out_dir_override=args.out
                 )
             except subprocess.CalledProcessError as e:
                 print(f" tecs failed for {archive}: {e}", file=sys.stderr)
@@ -263,6 +278,7 @@ def main() -> int:
                     args.tecs,
                     args.verbose,
                     args.cleanup,
+                    args.out
                 ): archive for archive in work_items
             }
             for fut in as_completed(futures):

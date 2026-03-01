@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  tecsuite:
+    build: .
+    image: tec-suite:latest
+    # run interactively by default so you can see the log; override
+    # command with arguments to process_rinex.py as needed
+    command: -h
+    volumes:
+      - ./tecs.cfg:/app/tecs.cfg:ro
+      - ./out:/app/out
+      # mount a directory containing RINEX data when running
+      #   - /path/to/rinex:/data/rinex
+    working_dir: /app
+    stdin_open: true
+    tty: true

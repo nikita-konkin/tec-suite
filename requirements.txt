@@ -1,0 +1,19 @@
+# Runtime dependencies for tec-suite
+#
+# The core application only uses the Python standard library, so no
+# third-party packages are required to run it.  Just install a suitable
+# Python interpreter (e.g. 3.12).
+#
+# For optional functionality or development, you may install the
+# following additional packages:
+#
+#   - Sphinx (>=1.5.1) and sphinx_rtd_theme for building the
+#     documentation.  These are already listed in docs/requirements.txt.
+#
+#   - If you plan to run the Tkinter GUI within a virtual environment
+#     on Linux, ensure the tkinter package is present (often provided by
+#     the python3-tk or tcl/tk distribution).
+#
+#   - Any packages you add in the future should be appended here.
+
+
