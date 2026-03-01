@@ -52,7 +52,7 @@ setup(
     install_requires=['future'],
 
     extras_require={
-        'test': ['coverage', 'nose'],
+        'test': ['coverage', 'pytest'],
     },
 
     package_data={},
