@@ -123,7 +123,8 @@ def process_archive(
 
         dest_dir = zip_path.with_suffix("")
         if not dest_dir.exists():
-            print(f"Unzipping {zip_path} -> {dest_dir}")
+            print(f"Unzipping {zip_path}")
+            # print(f"Unzipping {zip_path} -> {dest_dir}")
             with zipfile.ZipFile(zip_path, "r") as z:
                 z.extractall(dest_dir)
         else:
@@ -257,7 +258,7 @@ def main() -> int:
     # process archives either sequentially or in parallel
     if args.jobs <= 1:
         for idx, archive in work_items:
-            print(f"Processing file {idx}/{total}: {archive.name}")
+            print(f"Completed {idx}/{total}: {archive.name}")
             try:
                 process_archive(
                     archive,
