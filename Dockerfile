@@ -12,6 +12,6 @@ COPY . /app
 # optional install, makes modules importable and gives entrypoints
 RUN pip install --no-cache-dir .
 
-# helper script available via module invocation
-ENTRYPOINT ["python", "-m", "process_rinex"]
+# helper script available via module invocation; entrypoint creates year dir
+ENTRYPOINT ["python", "entrypoint.py"]
 CMD ["-h"]

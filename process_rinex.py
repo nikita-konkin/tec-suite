@@ -37,9 +37,22 @@ import tempfile
 import zipfile
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 
 DAY_RE = re.compile(r"^\d+$")
+SHORT_NAME_LOCKS: dict[str, threading.Lock] = {}
+SHORT_NAME_LOCKS_GUARD = threading.Lock()
+
+
+def get_short_name_lock(short_name: str) -> threading.Lock:
+    """Return a shared lock object for a short station name."""
+    with SHORT_NAME_LOCKS_GUARD:
+        lock = SHORT_NAME_LOCKS.get(short_name)
+        if lock is None:
+            lock = threading.Lock()
+            SHORT_NAME_LOCKS[short_name] = lock
+    return lock
 
 
 def is_day_dir(name: str) -> bool:
@@ -91,6 +104,8 @@ def process_archive(
 
     # create temporary config based on template
     tmp_cfg = None
+    short_lock: threading.Lock | None = None
+    short_lock_acquired = False
     try:
         tmp_fd, tmp_pathstr = tempfile.mkstemp(suffix=".cfg")
         os.close(tmp_fd)
@@ -121,6 +136,20 @@ def process_archive(
             if out_dir_path is None:
                 out_dir_path = (cfg_template.parent / "out").resolve()
 
+        output_base_dir = out_dir_path
+
+        def append_process_log(message: str) -> None:
+            if output_base_dir is None:
+                return
+            try:
+                log_file = output_base_dir / 'process_rinex.log'
+                os.makedirs(output_base_dir, exist_ok=True)
+                now_ts = __import__('datetime').datetime.now().isoformat()
+                with open(log_file, 'a') as lf:
+                    lf.write(f"{now_ts} - {message}\n")
+            except Exception:
+                pass
+
         dest_dir = zip_path.with_suffix("")
         if not dest_dir.exists():
             print(f"Unzipping {zip_path}")
@@ -131,10 +160,62 @@ def process_archive(
             print(f"Destination {dest_dir} already exists, skipping unzip")
 
         # change both obsDir and navDir to point to the unzipped directory
+        # while applying a temporary short naming scheme.
+        orig_dest_dir = dest_dir
+        orig_name = orig_dest_dir.name
+        short_name = orig_name[:7]
+        # converter-compatible base name for files (classic RINEX expects
+        # 8 chars before .YYo/.YYn etc). Example: armv001g33 -> armv0010
+        short_file_name = f"{short_name}0"
+        # short_file_name = short_name
+        renamed = False
+        short_lock = get_short_name_lock(short_name)
+        short_lock.acquire()
+        short_lock_acquired = True
+        try:
+            if orig_name != short_name:
+                candidate = dest_dir.parent / short_name
+                # if a stale directory from previous interrupted run exists,
+                # keep original naming for this archive to avoid clobbering
+                if candidate.exists():
+                    print(f"Short directory already exists ({candidate}), using original name for this archive")
+                    append_process_log(
+                        f"rename skipped directory '{dest_dir}' -> '{candidate}' (target already exists)"
+                    )
+                else:
+                    # 1) rename directory to first 7 chars
+                    os.rename(dest_dir, candidate)
+                    append_process_log(f"renamed directory '{dest_dir}' -> '{candidate}'")
+                    dest_dir = candidate
+
+                    # 2) rename extracted files from original full station
+                    #    prefix to converter-compatible short file prefix
+                    for root, _, files in os.walk(dest_dir):
+                        for f in files:
+                            if f.startswith(orig_name):
+                                src = os.path.join(root, f)
+                                dst = os.path.join(root, f.replace(orig_name, short_file_name, 1))
+                                try:
+                                    os.rename(src, dst)
+                                    append_process_log(f"renamed input file '{src}' -> '{dst}'")
+                                except Exception:
+                                    append_process_log(f"failed to rename input file '{src}' -> '{dst}'")
+                                    pass
+                    renamed = True
+        except Exception as exc:
+            print(f"Rename workflow failed for {orig_name}: {exc}")
+            append_process_log(f"rename workflow failed for '{orig_name}': {exc}")
+            dest_dir = orig_dest_dir
+
+        out_dir_for_tecs: Path | None = None
+        if output_base_dir is not None:
+            out_station_name = short_name if renamed else orig_name
+            out_dir_for_tecs = output_base_dir / out_station_name
+
         print(f"Writing dirs to config: {dest_dir} (temp {tmp_cfg})")
-        update_cfg(tmp_cfg, dest_dir, out_dir=out_dir_path)
+        update_cfg(tmp_cfg, dest_dir, out_dir=out_dir_for_tecs)
         if verbose:
-            print(f"Config file {tmp_cfg} updated with obsDir/navDir = {dest_dir} and outDir = {out_dir_path}")
+            print(f"Config file {tmp_cfg} updated with obsDir/navDir = {dest_dir} and outDir = {out_dir_for_tecs}")
 
         # run the tecs script
         start_ts = __import__('datetime').datetime.now()
@@ -149,13 +230,9 @@ def process_archive(
             raise
         finally:
             end_ts = __import__('datetime').datetime.now()
-            # append summary to our own log file in out_dir
-            if out_dir_path is not None:
-                log_file = out_dir_path / 'process_rinex.log'
-                os.makedirs(out_dir_path, exist_ok=True)
-                with open(log_file, 'a') as lf:
-                    lf.write(f"{start_ts.isoformat()} - {status} {dest_dir.name} "
-                             f"({dest_dir}) in {end_ts - start_ts}\n")
+            append_process_log(
+                f"{status} {orig_name} ({orig_dest_dir}) in {end_ts - start_ts}"
+            )
 
         if cleanup:
             # remove the directory tree
@@ -169,7 +246,148 @@ def process_archive(
             os.rmdir(dest_dir)
             if verbose:
                 print(f"Removed {dest_dir}")
+        # If we renamed the extracted input folder earlier, restore it now
+        elif renamed:
+            try:
+                # dest_dir currently points to the short-name path
+                short_path = dest_dir
+                orig_path = orig_dest_dir
+                # rename any files inside back to original names where possible
+                for root, _, files in os.walk(short_path):
+                    for f in files:
+                        if f.startswith(short_file_name):
+                            src = os.path.join(root, f)
+                            dst = os.path.join(root, f.replace(short_file_name, orig_name, 1))
+                            try:
+                                os.rename(src, dst)
+                                append_process_log(f"restored input file '{src}' -> '{dst}'")
+                            except Exception:
+                                append_process_log(f"failed to restore input file '{src}' -> '{dst}'")
+                                pass
+                os.rename(short_path, orig_path)
+                append_process_log(f"restored directory '{short_path}' -> '{orig_path}'")
+            except Exception:
+                append_process_log(f"failed to restore directory '{short_path}' -> '{orig_path}'")
+                pass
+            finally:
+                pass
+
+        # Relocate outputs from:
+        #   out/<station>/<year>/<yday>/<marker>
+        # to:
+        #   out/<year>/<yday>/<final_name>
+        # where final_name is original station name for shortened runs,
+        # otherwise marker (default tec-suite behavior).
+        try:
+            if output_base_dir is not None and out_dir_for_tecs is not None:
+                station_out_dir = out_dir_for_tecs
+                if station_out_dir.exists():
+                    for year_dir in station_out_dir.iterdir():
+                        if not year_dir.is_dir():
+                            continue
+                        for yday_dir in year_dir.iterdir():
+                            if not yday_dir.is_dir():
+                                continue
+                            for marker_dir in yday_dir.iterdir():
+                                if not marker_dir.is_dir():
+                                    continue
+
+                                final_leaf = orig_name if renamed else marker_dir.name
+                                target_dir = output_base_dir / year_dir.name / yday_dir.name / final_leaf
+                                target_dir.parent.mkdir(parents=True, exist_ok=True)
+
+                                if target_dir.exists():
+                                    # merge marker directory into target
+                                    for item in marker_dir.iterdir():
+                                        dst_item = target_dir / item.name
+                                        if dst_item.exists():
+                                            if item.is_dir() and dst_item.is_dir():
+                                                shutil.copytree(item, dst_item, dirs_exist_ok=True)
+                                                shutil.rmtree(item)
+                                                append_process_log(
+                                                    f"merged output subdirectory '{item}' -> '{dst_item}'"
+                                                )
+                                            else:
+                                                stem = item.stem
+                                                suffix = item.suffix
+                                                idx = 1
+                                                while True:
+                                                    alt = target_dir / f"{stem}__dup{idx}{suffix}"
+                                                    if not alt.exists():
+                                                        break
+                                                    idx += 1
+                                                shutil.move(str(item), str(alt))
+                                                append_process_log(
+                                                    f"moved output item '{item}' -> '{alt}' (name collision)"
+                                                )
+                                        else:
+                                            shutil.move(str(item), str(dst_item))
+                                            append_process_log(
+                                                f"moved output item '{item}' -> '{dst_item}'"
+                                            )
+                                    try:
+                                        marker_dir.rmdir()
+                                    except Exception:
+                                        pass
+                                else:
+                                    os.rename(marker_dir, target_dir)
+                                    append_process_log(
+                                        f"relocated output directory '{marker_dir}' -> '{target_dir}'"
+                                    )
+
+                            try:
+                                yday_dir.rmdir()
+                            except Exception:
+                                pass
+                        try:
+                            year_dir.rmdir()
+                        except Exception:
+                            pass
+                    try:
+                        station_out_dir.rmdir()
+                    except Exception:
+                        pass
+
+                # tecs writes tecs.log in station_out_dir; move it to base log
+                # namespace and then remove the now-empty station folder.
+                if station_out_dir.exists():
+                    station_log = station_out_dir / 'tecs.log'
+                    if station_log.exists():
+                        try:
+                            merged_log = output_base_dir / 'tecs_per_station.log'
+                            with open(station_log, 'r') as src, open(merged_log, 'a') as dst:
+                                dst.write(f"\n===== {orig_name} =====\n")
+                                dst.write(src.read())
+                            os.remove(station_log)
+                            append_process_log(
+                                f"merged station tecs log '{station_log}' -> '{merged_log}'"
+                            )
+                        except Exception as exc:
+                            append_process_log(
+                                f"failed to merge station tecs log '{station_log}': {exc}"
+                            )
+
+                    try:
+                        station_out_dir.rmdir()
+                        append_process_log(
+                            f"removed empty station output directory '{station_out_dir}'"
+                        )
+                    except Exception:
+                        pass
+                else:
+                    append_process_log(
+                        f"no station output directory found for '{orig_name}' (expected '{station_out_dir}')"
+                    )
+        except Exception as exc:
+            append_process_log(
+                f"failed to relocate output tree for '{orig_name}': {exc}"
+            )
     finally:
+        if short_lock is not None and short_lock_acquired:
+            try:
+                short_lock.release()
+            except Exception:
+                pass
         if tmp_cfg and tmp_cfg.exists():
             try:
                 tmp_cfg.unlink()

@@ -175,6 +175,33 @@ def main():
 
     if not obs_files:
         msg = "Can't find any observation file in '%s'." % CFG.obsDir
+        # log the error and include contents of each configured obsDir for diagnostics
+        logger.error(msg)
+        for d in CFG.obsDir:
+            try:
+                contents = os.listdir(d)
+            except Exception as err:
+                logger.error("Unable to list '%s': %s", d, err)
+            else:
+                logger.error("Directory '%s' contents: %s", d, contents)
+
+        # also append diagnostics to process_rinex.log in the outDir so the
+        # outer runner can see which directories were inspected
+        try:
+            proc_log = os.path.join(CFG.outDir, 'process_rinex.log')
+            with open(proc_log, 'a') as pl:
+                pl.write("%s - %s\n" % (__import__('datetime').datetime.now().isoformat(), msg))
+                for d in CFG.obsDir:
+                    try:
+                        contents = os.listdir(d)
+                    except Exception as err:
+                        pl.write("Unable to list '%s': %s\n" % (d, err))
+                    else:
+                        pl.write("Directory '%s' contents: %s\n" % (d, contents))
+        except Exception:
+            # best-effort only; do not prevent tecs from exiting
+            pass
+
         print(msg)
         raise SystemExit(0)
 
