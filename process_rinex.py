@@ -89,7 +89,8 @@ def process_archive(
     tecs_script: Path,
     verbose: bool = False,
     cleanup: bool = False,
-    out_dir_override: Path | None = None
+    out_dir_override: Path | None = None,
+    keep_ext_letters: set[str] | None = None,
 ) -> None:
     """Unzip *zip_path*, update config, and run tecs.
 
@@ -158,6 +159,28 @@ def process_archive(
                 z.extractall(dest_dir)
         else:
             print(f"Destination {dest_dir} already exists, skipping unzip")
+
+        if keep_ext_letters:
+            removed_count = 0
+            kept_count = 0
+            for root, _, files in os.walk(dest_dir):
+                for f in files:
+                    # handle names like *.26g, *.26o, *.26n by checking
+                    # the last letter of the final suffix
+                    suffix = Path(f).suffix.lower()
+                    ext_letter = suffix[-1] if suffix else ''
+                    file_path = Path(root) / f
+                    if ext_letter in keep_ext_letters:
+                        kept_count += 1
+                        continue
+                    try:
+                        file_path.unlink()
+                        removed_count += 1
+                    except Exception:
+                        pass
+            append_process_log(
+                f"filtered extracted files for '{zip_path.name}': kept={kept_count}, removed={removed_count}, allowed={sorted(keep_ext_letters)}"
+            )
 
         # change both obsDir and navDir to point to the unzipped directory
         # while applying a temporary short naming scheme.
@@ -430,7 +453,21 @@ def main() -> int:
         "--jobs", "-j", type=int, default=1,
         help="Number of archives to process in parallel (default 1)."
     )
+    parser.add_argument(
+        "--keep-exts", type=str, default="",
+        help="Comma-separated extension letters to keep after unzip (example: g,o,n). Other extracted files are deleted."
+    )
     args = parser.parse_args()
+
+    keep_ext_letters: set[str] | None = None
+    if args.keep_exts:
+        keep_ext_letters = {
+            item.strip().lstrip('.').lower()
+            for item in args.keep_exts.split(',')
+            if item.strip()
+        }
+        if not keep_ext_letters:
+            parser.error("--keep-exts was provided but no valid extension letters were parsed")
 
     root = args.root
     if not root.is_dir():
@@ -484,7 +521,8 @@ def main() -> int:
                     args.tecs,
                     verbose=args.verbose,
                     cleanup=args.cleanup,
-                    out_dir_override=args.out
+                    out_dir_override=args.out,
+                    keep_ext_letters=keep_ext_letters,
                 )
             except subprocess.CalledProcessError as e:
                 print(f" tecs failed for {archive}: {e}", file=sys.stderr)
@@ -504,6 +542,7 @@ def main() -> int:
                     args.verbose,
                     args.cleanup,
                     args.out,
+                    keep_ext_letters,
                 )
                 futures[fut] = (idx, archive)
 
