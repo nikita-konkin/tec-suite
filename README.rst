@@ -63,11 +63,33 @@ Run via docker-compose:
     # print help
     docker-compose up
 
-    # process RINEX with override output directory
+    # process RINEX with override output directory (manual mount)
     docker-compose run --rm \
       -v /host/rinex:/data/rinex \
       -v /host/out:/app/out \
       tecsuite -r /data/rinex -c /app/tecs.cfg -lo /app/out -j 4 -k
+
+    # Using the provided .env and docker-compose example
+    # 1) Edit the .env file at the project root and set RINEX_DATA_PATH_HOST
+    #    to the host folder containing your RINEX root (for example: Y:/data).
+    # 2) Uncomment the volume mapping in docker-compose.yml which mounts
+    #    ${RINEX_DATA_PATH_HOST} to ${RINEX_DATA_PATH} inside the container.
+    # 3) Run the container; process_rinex.py can then be invoked with a
+    #    server-relative path which will be resolved against the container
+    #    environment variable `RINEX_DATA_PATH` (for example `/2026_original/001`):
+
+    docker-compose run --rm \
+      tecsuite -r /2026_original/001 -c /app/tecs.cfg -o /app/out -j 4 -k
+
+    # To use the DAT_DATA_PATH variables:
+    # 1) Edit the .env file and set DAT_DATA_PATH_HOST to the host folder
+    #    where you want TECS outputs to be stored (for example: N:/RINEX).
+    # 2) Uncomment the DAT_DATA_PATH_HOST -> DAT_DATA_PATH volume mapping in
+    #    docker-compose.yml (see the commented example).
+    # 3) Run the container and pass a server-relative `--out` path (for
+    #    example `/2026_original/processed`) — the script will resolve it
+    #    against the container environment variable `DAT_DATA_PATH` so the
+    #    final output root becomes `${DAT_DATA_PATH}/${rel}`.
 
 Or run directly:
 

@@ -426,8 +426,11 @@ def main() -> int:
         description="Process zipped RINEX directories with tecs."
     )
     parser.add_argument(
-        "--root", "-r", type=Path, required=True,
-        help="Root directory containing day subfolders."
+        "--root", "-r", type=str, required=True,
+        help=("Root directory containing day subfolders. If the environment "
+              "variable RINEX_DATA_PATH_HOST is set you may pass a relative path "
+              "or a server-relative path (for example '/2026_original/001') "
+              "and it will be resolved against RINEX_DATA_PATH_HOST.")
     )
     parser.add_argument(
         "--cfg", "-c", type=Path, required=True,
@@ -469,17 +472,70 @@ def main() -> int:
         if not keep_ext_letters:
             parser.error("--keep-exts was provided but no valid extension letters were parsed")
 
-    root = args.root
+    # Resolve --root possibly against RINEX_DATA_PATH_HOST env variable
+    root_arg = args.root
+    # Prefer resolving against the container-side mount point `RINEX_DATA_PATH`.
+    # Fall back to `RINEX_DATA_PATH_HOST` only if the container path is not set.
+    root_arg = args.root
+    env_container_base = os.environ.get("RINEX_DATA_PATH")
+    env_host_base = os.environ.get("RINEX_DATA_PATH_HOST")
+    if (env_container_base or env_host_base) and (
+        not Path(root_arg).is_absolute() or root_arg.startswith(('/', '\\'))
+    ):
+        rel = str(root_arg).lstrip('/\\')
+        if env_container_base:
+            # resolve against the container mount point so path checks succeed
+            root = Path(env_container_base) / rel
+            if args.verbose:
+                print(f"Resolved --root against container base {env_container_base}: {root}")
+        else:
+            # container-side base not available; fall back to host base
+            root = Path(env_host_base) / rel
+            if args.verbose:
+                print(f"Resolved --root against host base {env_host_base}: {root}")
+    else:
+        root = Path(root_arg)
+
     if not root.is_dir():
         parser.error(f"Root {root} is not a directory")
 
     if args.verbose:
         print(f"Scanning root directory: {root}")
+
+    # Resolve --out against DAT_DATA_PATH / DAT_DATA_PATH_HOST if provided
+    out_path_resolved: Path | None = None
+    if args.out:
+        # args.out is a Path; if absolute, use as-is. If relative or
+        # server-relative (leading slash), resolve against DAT_DATA_PATH
+        # (container) or DAT_DATA_PATH_HOST (host) env variables if set.
+        if args.out.is_absolute():
+            out_path_resolved = args.out
+        else:
+            # prefer host-side DAT_DATA_PATH_HOST when available so that
+            # resolved --out paths refer to the host filesystem location
+            env_out_base = os.environ.get("DAT_DATA_PATH_HOST") or os.environ.get("DAT_DATA_PATH")
+            if env_out_base:
+                rel = str(args.out).lstrip('/\\')
+                out_path_resolved = Path(env_out_base) / rel
+            else:
+                out_path_resolved = (Path.cwd() / args.out).resolve()
+        if args.verbose:
+            print(f"Resolved output directory: {out_path_resolved}")
     if args.jobs > 1 and args.verbose:
         print(f"Using up to {args.jobs} parallel jobs")
 
     # gather all archive paths first
-    work_items: list[tuple[int,Path]] = []  # (index, archive)
+    work_items: list[tuple[int, Path]] = []  # (index, archive)
+
+    # 1) Add any zip files directly under root (treat root as a single day)
+    direct_archives = sorted(root.glob("*.zip"))
+    if direct_archives:
+        if args.verbose:
+            print(f"Found {len(direct_archives)} zip(s) directly in root: {root}")
+        for archive in direct_archives:
+            work_items.append((0, archive))
+
+    # 2) Then scan day subdirectories as before
     for entry in sorted(root.iterdir()):
         if not entry.is_dir():
             if args.verbose:
@@ -496,7 +552,8 @@ def main() -> int:
 
         archives = sorted(entry.glob("*.zip"))
         if not archives:
-            print(f" no zip archives found in {entry}")
+            if args.verbose:
+                print(f" no zip archives found in {entry}")
             continue
 
         for archive in archives:
@@ -521,7 +578,7 @@ def main() -> int:
                     args.tecs,
                     verbose=args.verbose,
                     cleanup=args.cleanup,
-                    out_dir_override=args.out,
+                    out_dir_override=out_path_resolved or args.out,
                     keep_ext_letters=keep_ext_letters,
                 )
             except subprocess.CalledProcessError as e:
@@ -541,7 +598,7 @@ def main() -> int:
                     args.tecs,
                     args.verbose,
                     args.cleanup,
-                    args.out,
+                    out_path_resolved or args.out,
                     keep_ext_letters,
                 )
                 futures[fut] = (idx, archive)
