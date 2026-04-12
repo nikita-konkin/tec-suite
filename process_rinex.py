@@ -115,6 +115,7 @@ def process_archive(
     cleanup: bool = False,
     out_dir_override: Path | None = None,
     keep_ext_letters: set[str] | None = None,
+    extract_base: Path | None = None,
 ) -> None:
     """Unzip *zip_path*, update config, and run tecs.
 
@@ -175,7 +176,16 @@ def process_archive(
             except Exception:
                 pass
 
-        dest_dir = zip_path.with_suffix("")
+        archive_name = zip_path.stem
+        if extract_base is not None:
+            # Keep extraction away from mounted source roots that may be read-only.
+            rel_hint = "_".join(zip_path.parts[-4:-1])
+            safe_rel_hint = re.sub(r"[^A-Za-z0-9_.-]+", "_", rel_hint) or "archives"
+            base_dir = extract_base / safe_rel_hint
+            base_dir.mkdir(parents=True, exist_ok=True)
+            dest_dir = base_dir / archive_name
+        else:
+            dest_dir = zip_path.with_suffix("")
         if not dest_dir.exists():
             print(f"Unzipping {zip_path}")
             # print(f"Unzipping {zip_path} -> {dest_dir}")
@@ -281,7 +291,8 @@ def process_archive(
                 f"{status} {orig_name} ({orig_dest_dir}) in {end_ts - start_ts}"
             )
 
-        if cleanup:
+        should_cleanup = cleanup or extract_base is not None
+        if should_cleanup:
             # remove the directory tree
             if verbose:
                 print(f"Cleaning up extracted directory {dest_dir}")
@@ -484,6 +495,13 @@ def main() -> int:
         "--keep-exts", type=str, default="",
         help="Comma-separated extension letters to keep after unzip (example: g,o,n). Other extracted files are deleted."
     )
+    parser.add_argument(
+        "--extract-base", type=Path, default=Path("/tmp/tecsuite_extract"),
+        help=(
+            "Directory where zip archives are extracted before processing "
+            "(default: /tmp/tecsuite_extract)."
+        )
+    )
     args = parser.parse_args()
 
     keep_ext_letters: set[str] | None = None
@@ -548,6 +566,15 @@ def main() -> int:
     if args.jobs > 1 and args.verbose:
         print(f"Using up to {args.jobs} parallel jobs")
 
+    extract_base_resolved: Path | None = None
+    if args.extract_base:
+        extract_base_resolved = args.extract_base
+        if not extract_base_resolved.is_absolute():
+            extract_base_resolved = (Path.cwd() / extract_base_resolved).resolve()
+        extract_base_resolved.mkdir(parents=True, exist_ok=True)
+        if args.verbose:
+            print(f"Using extraction workspace: {extract_base_resolved}")
+
     # gather all archive paths first
     work_items: list[tuple[int, Path]] = []  # (index, archive)
 
@@ -604,6 +631,7 @@ def main() -> int:
                     cleanup=args.cleanup,
                     out_dir_override=out_path_resolved or args.out,
                     keep_ext_letters=keep_ext_letters,
+                    extract_base=extract_base_resolved,
                 )
             except subprocess.CalledProcessError as e:
                 print(f" tecs failed for {archive}: {e}", file=sys.stderr)
@@ -624,6 +652,7 @@ def main() -> int:
                     args.cleanup,
                     out_path_resolved or args.out,
                     keep_ext_letters,
+                    extract_base_resolved,
                 )
                 futures[fut] = (idx, archive)
 
