@@ -60,6 +60,30 @@ def is_day_dir(name: str) -> bool:
     return bool(DAY_RE.fullmatch(name))
 
 
+def find_archives_in_folder(folder: Path, verbose: bool = False) -> list[Path]:
+    """Find zip archives in *folder* and one level of numeric subfolders.
+
+    This supports both layouts:
+    1) root/day/*.zip
+    2) root/month/day/*.zip
+    """
+    direct = sorted(folder.glob("*.zip"))
+    if direct:
+        return direct
+
+    nested: list[Path] = []
+    for child in sorted(folder.iterdir()):
+        if not child.is_dir() or not is_day_dir(child.name):
+            continue
+        nested.extend(sorted(child.glob("*.zip")))
+
+    if verbose and nested:
+        print(
+            f" found {len(nested)} zip archive(s) in nested day folders under {folder}"
+        )
+    return nested
+
+
 def update_cfg(cfg_path: Path, new_dir: Path, out_dir: Path | None = None) -> None:
     """Set `obsDir` and `navDir` in the configuration file to *new_dir`.
 
@@ -502,18 +526,18 @@ def main() -> int:
     if args.verbose:
         print(f"Scanning root directory: {root}")
 
-    # Resolve --out against DAT_DATA_PATH / DAT_DATA_PATH_HOST if provided
+    # Resolve --out against TECSUITE_OUT_DAT_DATA_PATH / TECSUITE_OUT_DAT_DATA_PATH_HOST if provided
     out_path_resolved: Path | None = None
     if args.out:
         # args.out is a Path; if absolute, use as-is. If relative or
-        # server-relative (leading slash), resolve against DAT_DATA_PATH
-        # (container) or DAT_DATA_PATH_HOST (host) env variables if set.
+        # server-relative (leading slash), resolve against TECSUITE_OUT_DAT_DATA_PATH
+        # (container) or TECSUITE_OUT_DAT_DATA_PATH_HOST (host) env variables if set.
         if args.out.is_absolute():
             out_path_resolved = args.out
         else:
-            # prefer host-side DAT_DATA_PATH_HOST when available so that
+            # prefer host-side TECSUITE_OUT_DAT_DATA_PATH_HOST when available so that
             # resolved --out paths refer to the host filesystem location
-            env_out_base = os.environ.get("DAT_DATA_PATH_HOST") or os.environ.get("DAT_DATA_PATH")
+            env_out_base = os.environ.get("TECSUITE_OUT_DAT_DATA_PATH_HOST") or os.environ.get("TECSUITE_OUT_DAT_DATA_PATH")
             if env_out_base:
                 rel = str(args.out).lstrip('/\\')
                 out_path_resolved = Path(env_out_base) / rel
@@ -550,7 +574,7 @@ def main() -> int:
             print(f"\n=== processing day folder: {entry} ===")
             print(f" listing contents: {list(entry.iterdir())}")
 
-        archives = sorted(entry.glob("*.zip"))
+        archives = find_archives_in_folder(entry, verbose=args.verbose)
         if not archives:
             if args.verbose:
                 print(f" no zip archives found in {entry}")

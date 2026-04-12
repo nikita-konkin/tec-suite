@@ -81,15 +81,15 @@ Run via docker-compose:
     docker-compose run --rm \
       tecsuite -r /2026_original/001 -c /app/tecs.cfg -o /app/out -j 4 -k
 
-    # To use the DAT_DATA_PATH variables:
-    # 1) Edit the .env file and set DAT_DATA_PATH_HOST to the host folder
+    # To use the TECSUITE_OUT_DAT_DATA_PATH variables:
+    # 1) Edit the .env file and set TECSUITE_OUT_DAT_DATA_PATH_HOST to the host folder
     #    where you want TECS outputs to be stored (for example: N:/RINEX).
-    # 2) Uncomment the DAT_DATA_PATH_HOST -> DAT_DATA_PATH volume mapping in
+    # 2) Uncomment the TECSUITE_OUT_DAT_DATA_PATH_HOST -> TECSUITE_OUT_DAT_DATA_PATH volume mapping in
     #    docker-compose.yml (see the commented example).
     # 3) Run the container and pass a server-relative `--out` path (for
     #    example `/2026_original/processed`) — the script will resolve it
-    #    against the container environment variable `DAT_DATA_PATH` so the
-    #    final output root becomes `${DAT_DATA_PATH}/${rel}`.
+    #    against the container environment variable `TECSUITE_OUT_DAT_DATA_PATH` so the
+    #    final output root becomes `${TECSUITE_OUT_DAT_DATA_PATH}/${rel}`.
 
 Or run directly:
 

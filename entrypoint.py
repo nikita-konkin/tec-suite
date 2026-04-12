@@ -9,7 +9,7 @@ import sys
 
 
 def ensure_year_dir(base: str = "/app/out") -> None:
-    year = str(datetime.datetime.utcnow().year)
+    year = str(datetime.datetime.now(datetime.UTC).year)
     path = os.path.join(base, year)
     try:
         os.makedirs(path, exist_ok=True)

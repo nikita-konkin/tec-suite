@@ -15,12 +15,12 @@ services:
       # mount a directory containing RINEX data when running
       #   - /path/to/rinex:/data/rinex
       - ${RINEX_DATA_PATH_HOST}:${RINEX_DATA_PATH}:rw
-      - ${DAT_DATA_PATH_HOST}:${DAT_DATA_PATH}:rw
+      - ${TECSUITE_OUT_DAT_DATA_PATH_HOST}:${TECSUITE_OUT_DAT_DATA_PATH}:rw
       # You can use the variables from .env to mount the host RINEX root
       # into the container. Example (uncomment to enable):
       #   - ${RINEX_DATA_PATH_HOST}:${RINEX_DATA_PATH}:ro
       # Similarly, mount the host output directory into the container:
-      #   - ${DAT_DATA_PATH_HOST}:${DAT_DATA_PATH}:rw
+      #   - ${TECSUITE_OUT_DAT_DATA_PATH_HOST}:${TECSUITE_OUT_DAT_DATA_PATH}:rw
     working_dir: /app
     stdin_open: true
     tty: true
