@@ -25,12 +25,16 @@ If you have a directory with day folders (``01``, ``02``, etc.) containing
 
     python process_rinex.py -r /path/to/rinex/root -c tecs.cfg -t tecs.py -j 4 -v -k
 
+    # process only selected days (supports values and ranges)
+    python process_rinex.py -r /path/to/rinex/root -c tecs.cfg -t tecs.py -j 4 --days 1-5,10,12-14
+
 Options:
 
 * ``-r``, ``--root`` : root directory containing day folders
 * ``-c``, ``--cfg`` : path to configuration file
 * ``-t``, ``--tecs`` : path to tecs.py script
 * ``-j``, ``--jobs`` : number of parallel jobs (default 1)
+* ``--days`` : process only selected day folders (for example ``1-5,10,12-14``)
 * ``-o``, ``--out`` : override output directory (optional)
 * ``-v``, ``--verbose`` : verbose output
 * ``-k``, ``--cleanup`` : delete extracted folders after processing
@@ -39,6 +43,7 @@ The batch runner:
 
 1. Scans the root for day folders (names matching digits: ``1``, ``01``, ``001``, etc.).
 2. For each day folder, finds all ``*.zip`` archives.
+  If ``--days`` is set, only matching day folders are scanned.
 3. Unzips each archive into a sibling directory.
 4. Runs ``tecs`` on it (with temporary config to avoid race conditions).
 5. Optionally cleans up the extracted directory.
@@ -80,6 +85,10 @@ Run via docker-compose:
 
     docker-compose run --rm \
       tecsuite -r /2026_original/001 -c /app/tecs.cfg -o /app/out -j 4 -k
+
+    # process only selected days inside the provided root
+    docker-compose run --rm \
+      tecsuite -r /2026_original/001 -c /app/tecs.cfg -o /app/out -j 4 --days 1-10 -k
 
     # To use the TECSUITE_OUT_DAT_DATA_PATH variables:
     # 1) Edit the .env file and set TECSUITE_OUT_DAT_DATA_PATH_HOST to the host folder

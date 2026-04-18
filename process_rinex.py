@@ -60,7 +60,41 @@ def is_day_dir(name: str) -> bool:
     return bool(DAY_RE.fullmatch(name))
 
 
-def find_archives_in_folder(folder: Path, verbose: bool = False) -> list[Path]:
+def parse_days_selector(selector: str) -> set[int]:
+    """Parse a selector like '1-5,8,10-12' into a set of day numbers."""
+    days: set[int] = set()
+    for chunk in selector.split(","):
+        part = chunk.strip()
+        if not part:
+            continue
+        if "-" in part:
+            start_str, end_str = part.split("-", 1)
+            if not start_str.strip().isdigit() or not end_str.strip().isdigit():
+                raise ValueError(f"Invalid day range '{part}'")
+            start = int(start_str.strip())
+            end = int(end_str.strip())
+            if start <= 0 or end <= 0:
+                raise ValueError("Day values must be positive integers")
+            if end < start:
+                raise ValueError(f"Range end before start in '{part}'")
+            days.update(range(start, end + 1))
+        else:
+            if not part.isdigit():
+                raise ValueError(f"Invalid day value '{part}'")
+            value = int(part)
+            if value <= 0:
+                raise ValueError("Day values must be positive integers")
+            days.add(value)
+    if not days:
+        raise ValueError("No valid day values found")
+    return days
+
+
+def find_archives_in_folder(
+    folder: Path,
+    verbose: bool = False,
+    allowed_days: set[int] | None = None,
+) -> list[Path]:
     """Find zip archives in *folder* and one level of numeric subfolders.
 
     This supports both layouts:
@@ -74,6 +108,10 @@ def find_archives_in_folder(folder: Path, verbose: bool = False) -> list[Path]:
     nested: list[Path] = []
     for child in sorted(folder.iterdir()):
         if not child.is_dir() or not is_day_dir(child.name):
+            continue
+        if allowed_days is not None and int(child.name) not in allowed_days:
+            if verbose:
+                print(f" skipping nested day folder not in selection: {child}")
             continue
         nested.extend(sorted(child.glob("*.zip")))
 
@@ -496,6 +534,13 @@ def main() -> int:
         help="Comma-separated extension letters to keep after unzip (example: g,o,n). Other extracted files are deleted."
     )
     parser.add_argument(
+        "--days", type=str, default="",
+        help=(
+            "Day selection filter. Supports comma-separated values and ranges, "
+            "for example: 1-5,10,12-14. Only selected day folders are processed."
+        )
+    )
+    parser.add_argument(
         "--extract-base", type=Path, default=Path("/tmp/tecsuite_extract"),
         help=(
             "Directory where zip archives are extracted before processing "
@@ -513,6 +558,13 @@ def main() -> int:
         }
         if not keep_ext_letters:
             parser.error("--keep-exts was provided but no valid extension letters were parsed")
+
+    allowed_days: set[int] | None = None
+    if args.days:
+        try:
+            allowed_days = parse_days_selector(args.days)
+        except ValueError as exc:
+            parser.error(f"Invalid --days value: {exc}")
 
     # Resolve --root possibly against RINEX_DATA_PATH_HOST env variable
     root_arg = args.root
@@ -565,6 +617,8 @@ def main() -> int:
             print(f"Resolved output directory: {out_path_resolved}")
     if args.jobs > 1 and args.verbose:
         print(f"Using up to {args.jobs} parallel jobs")
+    if allowed_days is not None and args.verbose:
+        print(f"Filtering to selected day values: {sorted(allowed_days)}")
 
     extract_base_resolved: Path | None = None
     if args.extract_base:
@@ -596,12 +650,20 @@ def main() -> int:
             if args.verbose:
                 print(f" ignoring non-day directory: {entry.name}")
             continue
+        if allowed_days is not None and int(entry.name) not in allowed_days:
+            if args.verbose:
+                print(f" skipping day folder not in selection: {entry}")
+            continue
 
         if args.verbose:
             print(f"\n=== processing day folder: {entry} ===")
             print(f" listing contents: {list(entry.iterdir())}")
 
-        archives = find_archives_in_folder(entry, verbose=args.verbose)
+        archives = find_archives_in_folder(
+            entry,
+            verbose=args.verbose,
+            allowed_days=allowed_days,
+        )
         if not archives:
             if args.verbose:
                 print(f" no zip archives found in {entry}")
