@@ -94,13 +94,13 @@ def compose_navigation_re(system, epoch):
     classic_nav_tmpl = r'^(\w{{4}}){day}\w\.{year}{system}'
 
     modern_nav_tmpl = (
-        '^(\w{{4}})'
-        '\w{{5}}'
-        '_\w_'
-        '{year}{day}\d{{4}}'
-        '_\w{{3}}'
-        '(_\w{{3}})?'
-        '_{system}N\.rnx'
+        r'^(\w{{4}})'
+        r'\w{{5}}'
+        r'_\w_'
+        r'{year}{day}\d{{4}}'
+        r'_\w{{3}}'
+        r'(_\w{{3}})?'
+        r'_{system}N\.rnx'
     )
 
     modern_nav = modern_nav_tmpl.format(year=epoch.strftime('%Y'),

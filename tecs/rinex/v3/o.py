@@ -102,19 +102,40 @@ class Obs3(ObservationData):
         err_msg = 'invalid interval value: {}'
         logger = logging.getLogger(self._name + '._det_interval')
 
-        epoch_records = [
-            self._next_epoch(),
-            self._next_epoch()
-        ]
+        def _seek_to_end_of_header():
+            self._fobj.seek(0)
+            for line in self._fobj:
+                if line[60:].rstrip() == 'END OF HEADER':
+                    break
 
-        while epoch_records[0] == epoch_records[1]:
-            epoch_records[1] = self._next_epoch()
+        epoch0 = self._next_epoch()
+        if epoch0 is None:
+            if self.interval.value is not None and self.interval.value > 0:
+                logger.warning(
+                    "No epoch records found in %s; using header interval %s.",
+                    self.filename,
+                    self.interval.value,
+                )
+                _seek_to_end_of_header()
+                return
+            raise RinexError(self.filename, err_msg.format('None (no epoch records)'))
 
-        for er in epoch_records:
-            if er is None:
-                raise RinexError(self.filename, err_msg.format('None'))
+        epoch1 = self._next_epoch()
+        while epoch1 is not None and epoch0 == epoch1:
+            epoch1 = self._next_epoch()
 
-        dt = epoch_records[1] - epoch_records[0]
+        if epoch1 is None:
+            if self.interval.value is not None and self.interval.value > 0:
+                logger.warning(
+                    "Only one epoch record found in %s; using header interval %s.",
+                    self.filename,
+                    self.interval.value,
+                )
+                _seek_to_end_of_header()
+                return
+            raise RinexError(self.filename, err_msg.format('None (only one epoch record)'))
+
+        dt = epoch1 - epoch0
         dt = dt.total_seconds()
 
         if dt <= 0:
@@ -129,11 +150,7 @@ class Obs3(ObservationData):
 
         self.interval.value = '{:10.3f}'.format(dt)
 
-        self._fobj.seek(0)
-        for line in self._fobj:
-            line = line[60:].rstrip()
-            if line == 'END OF HEADER':
-                break
+        _seek_to_end_of_header()
 
     def _next_epoch(self):
         """_next_epoch() -> None
