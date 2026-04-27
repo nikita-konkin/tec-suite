@@ -28,6 +28,7 @@ backup or use version control if you need the original values preserved.
 from __future__ import annotations
 
 import argparse
+import datetime
 import os
 import re
 import shutil
@@ -137,10 +138,27 @@ def parse_days_selector(selector: str) -> set[int]:
     return days
 
 
+def infer_year_from_root(root: Path) -> int | None:
+    """Best-effort inference of the year from a root path like /data/rinex/2025_original."""
+    # Prefer explicit ".../<YYYY>_original" segment when present
+    for part in reversed(root.parts):
+        m = re.match(r"^(?P<year>\d{4})_original$", part)
+        if m:
+            return int(m.group("year"))
+    # Fall back to any 4-digit segment
+    for part in reversed(root.parts):
+        if part.isdigit() and len(part) == 4:
+            return int(part)
+    return None
+
+
 def find_archives_in_folder(
     folder: Path,
     verbose: bool = False,
     allowed_days: set[int] | None = None,
+    *,
+    year_hint: int | None = None,
+    month_hint: int | None = None,
 ) -> list[Path]:
     """Find zip archives in *folder* and one level of numeric subfolders.
 
@@ -156,10 +174,31 @@ def find_archives_in_folder(
     for child in sorted(folder.iterdir()):
         if not child.is_dir() or not is_day_dir(child.name):
             continue
-        if allowed_days is not None and int(child.name) not in allowed_days:
-            if verbose:
-                print(f" skipping nested day folder not in selection: {child}")
-            continue
+        day_value = int(child.name)
+        if allowed_days is not None:
+            # Days filter is always interpreted as DOY (day-of-year).
+            # For month/day layouts we map month+day -> DOY using the inferred year.
+            if month_hint is not None:
+                if year_hint is None:
+                    raise ValueError(
+                        f"Cannot apply DOY filter inside month folder {folder} because year could not be inferred from root path."
+                    )
+                try:
+                    day_of_year = datetime.date(year_hint, month_hint, day_value).timetuple().tm_yday
+                except ValueError:
+                    # Invalid calendar day (e.g. 02/30); just skip it.
+                    if verbose:
+                        print(f" skipping nested day folder with invalid calendar date: {child}")
+                    continue
+                if day_of_year not in allowed_days:
+                    if verbose:
+                        print(f" skipping nested day folder not in selection: {child}")
+                    continue
+            else:
+                if day_value not in allowed_days:
+                    if verbose:
+                        print(f" skipping nested day folder not in selection: {child}")
+                    continue
         nested.extend(sorted(child.glob("*.zip")))
 
     if verbose and nested:
@@ -651,6 +690,10 @@ def main() -> int:
     if args.verbose:
         print(f"Scanning root directory: {root}")
 
+    root_year_hint = infer_year_from_root(root)
+    if args.verbose and root_year_hint is not None:
+        print(f"Inferred year from root path: {root_year_hint}")
+
     # Resolve --out against TECSUITE_OUT_DAT_DATA_PATH / TECSUITE_OUT_DAT_DATA_PATH_HOST if provided
     out_path_resolved: Path | None = None
     if args.out:
@@ -734,6 +777,8 @@ def main() -> int:
             entry,
             verbose=args.verbose,
             allowed_days=allowed_days,
+            year_hint=root_year_hint,
+            month_hint=int(entry.name) if entry.name.isdigit() and 1 <= int(entry.name) <= 12 else None,
         )
         if not archives:
             if args.verbose:
