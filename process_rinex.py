@@ -45,6 +45,53 @@ SHORT_NAME_LOCKS: dict[str, threading.Lock] = {}
 SHORT_NAME_LOCKS_GUARD = threading.Lock()
 
 
+def _rmtree_best_effort(path: Path, verbose: bool = False) -> None:
+    if not path.exists():
+        return
+
+    def _onerror(func, p, exc_info):  # noqa: ANN001
+        try:
+            os.chmod(p, 0o700)
+            func(p)
+        except Exception:
+            pass
+
+    try:
+        shutil.rmtree(path, onerror=_onerror)
+        if verbose:
+            print(f"Removed {path}")
+    except Exception as exc:
+        if verbose:
+            print(f"Failed to remove {path}: {exc}")
+
+
+def _rmdir_empty_parents(path: Path, stop_at: Path, verbose: bool = False) -> None:
+    """Remove empty parent directories up to (but not including) *stop_at*."""
+    try:
+        stop_at_resolved = stop_at.resolve()
+    except Exception:
+        stop_at_resolved = stop_at
+
+    cur = path
+    while True:
+        try:
+            cur_resolved = cur.resolve()
+        except Exception:
+            cur_resolved = cur
+        if cur_resolved == stop_at_resolved:
+            return
+        try:
+            cur.rmdir()
+            if verbose:
+                print(f"Removed empty dir {cur}")
+        except Exception:
+            return
+        parent = cur.parent
+        if parent == cur:
+            return
+        cur = parent
+
+
 def get_short_name_lock(short_name: str) -> threading.Lock:
     """Return a shared lock object for a short station name."""
     with SHORT_NAME_LOCKS_GUARD:
@@ -170,6 +217,7 @@ def process_archive(
     tmp_cfg = None
     short_lock: threading.Lock | None = None
     short_lock_acquired = False
+    dest_dir: Path | None = None
     try:
         tmp_fd, tmp_pathstr = tempfile.mkstemp(suffix=".cfg")
         os.close(tmp_fd)
@@ -318,11 +366,12 @@ def process_archive(
         if verbose:
             print(f"Executing: {sys.executable} {tecs_script} -c {tmp_cfg}")
         status = "success"
+        processing_error: subprocess.CalledProcessError | None = None
         try:
             subprocess.run([sys.executable, str(tecs_script), "-c", str(tmp_cfg)], check=True)
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as exc:
             status = "failure"
-            raise
+            processing_error = exc
         finally:
             end_ts = __import__('datetime').datetime.now()
             append_process_log(
@@ -334,14 +383,9 @@ def process_archive(
             # remove the directory tree
             if verbose:
                 print(f"Cleaning up extracted directory {dest_dir}")
-            for root, dirs, files in os.walk(dest_dir, topdown=False):
-                for name in files:
-                    os.remove(os.path.join(root, name))
-                for name in dirs:
-                    os.rmdir(os.path.join(root, name))
-            os.rmdir(dest_dir)
-            if verbose:
-                print(f"Removed {dest_dir}")
+            _rmtree_best_effort(dest_dir, verbose=verbose)
+            if extract_base is not None:
+                _rmdir_empty_parents(dest_dir.parent, extract_base, verbose=verbose)
         # If we renamed the extracted input folder earlier, restore it now
         elif renamed:
             try:
@@ -365,8 +409,9 @@ def process_archive(
             except Exception:
                 append_process_log(f"failed to restore directory '{short_path}' -> '{orig_path}'")
                 pass
-            finally:
-                pass
+
+        if processing_error is not None:
+            raise processing_error
 
         # Relocate outputs from:
         #   out/<station>/<year>/<yday>/<marker>
@@ -479,6 +524,16 @@ def process_archive(
                 f"failed to relocate output tree for '{orig_name}': {exc}"
             )
     finally:
+        # If something failed before the normal cleanup block ran, make sure
+        # temp extraction data (especially under /tmp) doesn't accumulate.
+        try:
+            should_cleanup = cleanup or extract_base is not None
+            if should_cleanup and dest_dir is not None:
+                _rmtree_best_effort(dest_dir, verbose=verbose)
+                if extract_base is not None:
+                    _rmdir_empty_parents(dest_dir.parent, extract_base, verbose=verbose)
+        except Exception:
+            pass
         if short_lock is not None and short_lock_acquired:
             try:
                 short_lock.release()

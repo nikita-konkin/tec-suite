@@ -36,6 +36,7 @@ Options:
 * ``-j``, ``--jobs`` : number of parallel jobs (default 1)
 * ``--days`` : process only selected day folders (for example ``1-5,10,12-14``)
 * ``-o``, ``--out`` : override output directory (optional)
+* ``--extract-base`` : temp directory for zip extraction (default ``/tmp/tecsuite_extract``)
 * ``-v``, ``--verbose`` : verbose output
 * ``-k``, ``--cleanup`` : delete extracted folders after processing
 
@@ -44,9 +45,9 @@ The batch runner:
 1. Scans the root for day folders (names matching digits: ``1``, ``01``, ``001``, etc.).
 2. For each day folder, finds all ``*.zip`` archives.
   If ``--days`` is set, only matching day folders are scanned.
-3. Unzips each archive into a sibling directory.
+3. Unzips each archive into a temp directory under ``--extract-base`` (default: ``/tmp/tecsuite_extract``).
 4. Runs ``tecs`` on it (with temporary config to avoid race conditions).
-5. Optionally cleans up the extracted directory.
+5. Cleans up extracted temp data after each archive (even if ``tecs`` fails).
 6. Logs progress to ``out/process_rinex.log``.
 
 All archives in a day are processed sequentially; you can specify ``-j N`` to run
