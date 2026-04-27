@@ -695,7 +695,15 @@ def main() -> int:
         for archive in direct_archives:
             work_items.append((0, archive))
 
-    # 2) Then scan day subdirectories as before
+    # 2) Then scan numeric subdirectories.
+    # Note: the source layout can be either:
+    #   - root/day/*.zip
+    #   - root/month/day/*.zip
+    #
+    # When --days is used, we must NOT apply the filter to the first level
+    # unconditionally, because the first level can be "month" (01..12). Doing so
+    # would skip all months for selections like 21-30 and never descend into the
+    # actual day folders.
     for entry in sorted(root.iterdir()):
         if not entry.is_dir():
             if args.verbose:
@@ -705,13 +713,21 @@ def main() -> int:
             if args.verbose:
                 print(f" ignoring non-day directory: {entry.name}")
             continue
-        if allowed_days is not None and int(entry.name) not in allowed_days:
-            if args.verbose:
-                print(f" skipping day folder not in selection: {entry}")
+
+        # If this numeric folder contains zip files directly, treat it as a "day"
+        # directory and apply the --days filter to its own name.
+        direct_in_entry = sorted(entry.glob("*.zip"))
+        if direct_in_entry:
+            if allowed_days is not None and int(entry.name) not in allowed_days:
+                if args.verbose:
+                    print(f" skipping day folder not in selection: {entry}")
+                continue
+            for archive in direct_in_entry:
+                work_items.append((0, archive))
             continue
 
         if args.verbose:
-            print(f"\n=== processing day folder: {entry} ===")
+            print(f"\n=== processing numeric folder: {entry} ===")
             print(f" listing contents: {list(entry.iterdir())}")
 
         archives = find_archives_in_folder(
