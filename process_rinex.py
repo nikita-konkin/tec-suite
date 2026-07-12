@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import filecmp
 import os
 import re
 import shutil
@@ -455,9 +456,11 @@ def process_archive(
         # Relocate outputs from:
         #   out/<station>/<year>/<yday>/<marker>
         # to:
-        #   out/<year>/<yday>/<final_name>
-        # where final_name is original station name for shortened runs,
-        # otherwise marker (default tec-suite behavior).
+        #   out/<year>/<yday>/<marker>
+        # The marker is the 4-char site code tecs derives from the obs file
+        # name, so daily and session (re-upload) archives of one station all
+        # land in the same directory; colliding file names get __dupN unless
+        # the content is byte-identical.
         try:
             if output_base_dir is not None and out_dir_for_tecs is not None:
                 station_out_dir = out_dir_for_tecs
@@ -472,7 +475,7 @@ def process_archive(
                                 if not marker_dir.is_dir():
                                     continue
 
-                                final_leaf = orig_name if renamed else marker_dir.name
+                                final_leaf = marker_dir.name.lower()
                                 target_dir = output_base_dir / year_dir.name / yday_dir.name / final_leaf
                                 target_dir.parent.mkdir(parents=True, exist_ok=True)
 
@@ -486,6 +489,13 @@ def process_archive(
                                                 shutil.rmtree(item)
                                                 append_process_log(
                                                     f"merged output subdirectory '{item}' -> '{dst_item}'"
+                                                )
+                                            elif item.is_file() and dst_item.is_file() and filecmp.cmp(
+                                                str(item), str(dst_item), shallow=False
+                                            ):
+                                                item.unlink()
+                                                append_process_log(
+                                                    f"dropped output item '{item}' (byte-identical to '{dst_item}')"
                                                 )
                                             else:
                                                 stem = item.stem
