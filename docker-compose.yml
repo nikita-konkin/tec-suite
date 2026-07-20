@@ -3,7 +3,7 @@ version: '3.8'
 services:
   tecsuite:
     build: .
-    image: tec-suite:latest
+    image: nikitaikonkin/tec-suite:latest
     env_file:
       - .env
     # run interactively by default so you can see the log; override
