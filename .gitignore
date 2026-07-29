@@ -25,3 +25,8 @@ tec-suite-v*/
 tec-suite-v*.*
 
 out/
+
+# Local secrets / environment (keep the example template tracked)
+.env
+.env.*
+!.env.example
